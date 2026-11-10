@@ -1,0 +1,6 @@
+pandas>=2.2
+pyarrow>=15.0
+SQLAlchemy>=2.0
+psycopg2-binary>=2.9
+azure-storage-blob>=12.19
+python-dotenv>=1.0
