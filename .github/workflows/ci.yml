@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-unit-tests:
+    name: Lint + pruebas unitarias + validación ARM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Lint (ruff)
+        run: ruff check src tests scripts
+
+      - name: Validar plantillas ARM
+        run: python scripts/validate_arm.py
+
+      - name: Pruebas unitarias
+        run: |
+          mkdir -p reports
+          pytest --junitxml=reports/unit-tests.xml --cov=comisiones --cov-report=term-missing
+
+      - name: Publicar resultados de pruebas
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: reports/
+
+  integration-tests:
+    name: Prueba de integración (Postgres + Azurite)
+    needs: lint-unit-tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: dmc
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dmc"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      RUN_INTEGRATION: "1"
+      PG_HOST: localhost
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      PG_DATABASE: dmc
+      STORAGE_MODE: blob
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Cargar datos sintéticos en Postgres
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d dmc -v ON_ERROR_STOP=1 -f sql/seed_test_db.sql
+
+      - name: Levantar Azurite (emulador de Blob Storage)
+        run: |
+          npm install -g azurite
+          azurite-blob --silent --location /tmp/azurite --blobHost 127.0.0.1 --blobPort 10000 --skipApiVersionCheck --loose --disableTelemetry &
+          sleep 5
+
+      - name: Prueba end-to-end
+        run: pytest tests/test_integration.py --junitxml=reports/integration-tests.xml
+
+      - name: Publicar resultados
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: reports/

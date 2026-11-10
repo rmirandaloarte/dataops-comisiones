@@ -1,0 +1,46 @@
+name: CD
+
+# Se ejecuta automáticamente cuando el CI termina OK en main,
+# o manualmente desde la pestaña Actions.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dev:
+    # Gate automático 1: solo si el CI fue exitoso
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/deploy-env.yml
+    with:
+      environment: dev
+      seed_db: true
+      ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+    secrets: inherit
+
+  test:
+    # Gate automático 2: solo si dev pasó pipeline + smoke test
+    needs: dev
+    uses: ./.github/workflows/deploy-env.yml
+    with:
+      environment: test
+      ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+    secrets: inherit
+
+  prod:
+    # Gate automático 3: solo si test pasó pipeline + smoke test
+    needs: test
+    uses: ./.github/workflows/deploy-env.yml
+    with:
+      environment: prod
+      ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+    secrets: inherit
