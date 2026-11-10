@@ -1,0 +1,73 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "Data Lake (ADLS Gen2) para el pipeline DataOps de comisiones: contenedores raw y curated."
+  },
+  "parameters": {
+    "environment": {
+      "type": "string",
+      "allowedValues": [ "dev", "test", "prod" ],
+      "metadata": { "description": "Ambiente de despliegue." }
+    },
+    "projectName": {
+      "type": "string",
+      "defaultValue": "comisiones",
+      "maxLength": 11
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "skuName": {
+      "type": "string",
+      "defaultValue": "Standard_LRS",
+      "allowedValues": [ "Standard_LRS", "Standard_ZRS", "Standard_GRS" ]
+    }
+  },
+  "variables": {
+    "storageAccountName": "[toLower(concat('st', parameters('projectName'), parameters('environment'), take(uniqueString(resourceGroup().id), 6)))]",
+    "containers": [ "raw", "curated" ]
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "[parameters('skuName')]" },
+      "kind": "StorageV2",
+      "tags": {
+        "proyecto": "dataops-comisiones",
+        "ambiente": "[parameters('environment')]"
+      },
+      "properties": {
+        "isHnsEnabled": true,
+        "minimumTlsVersion": "TLS1_2",
+        "supportsHttpsTrafficOnly": true,
+        "allowBlobPublicAccess": false,
+        "accessTier": "Hot"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-01-01",
+      "name": "[concat(variables('storageAccountName'), '/default/', variables('containers')[copyIndex()])]",
+      "copy": { "name": "containerCopy", "count": "[length(variables('containers'))]" },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ],
+      "properties": { "publicAccess": "None" }
+    }
+  ],
+  "outputs": {
+    "storageAccountName": {
+      "type": "string",
+      "value": "[variables('storageAccountName')]"
+    },
+    "dfsEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))).primaryEndpoints.dfs]"
+    }
+  }
+}
